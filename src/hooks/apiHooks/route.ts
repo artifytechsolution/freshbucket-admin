@@ -41,7 +41,7 @@ export const apiRoutes = {
     GET: {
       query: "user_list",
       method: "GET",
-      url: `${BASE_URL}/auth`,
+      url: `${BASE_URL}/api/auth`,
     },
   },
   findHotel: {

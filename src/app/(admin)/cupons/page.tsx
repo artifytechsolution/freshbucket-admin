@@ -46,7 +46,7 @@ const CreateCouponModal = ({ isOpen, onClose, onSuccess }) => {
         status: data.status,
       };
 
-      const response = await fetch("http://localhost:8030/api/cupon", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/cupon`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -231,7 +231,7 @@ export default function CouponManagementPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("http://localhost:8030/api/cupon");
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/cupon`);
       const result = await response.json();
 
       if (result.status === "success") {
@@ -253,7 +253,7 @@ export default function CouponManagementPage() {
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`http://localhost:8030/api/cupon/${deleteModalData.id}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/cupon/${deleteModalData.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" }
       });

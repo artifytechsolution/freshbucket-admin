@@ -1663,7 +1663,7 @@ export default function ProductsDisplayPage() {
   const fetchCategories = async () => {
     setIsFetchingCategories(true);
     try {
-      const response = await fetch("http://localhost:8030/api/categories", { method: "GET", headers: { "Content-Type": "application/json" } });
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/categories`, { method: "GET", headers: { "Content-Type": "application/json" } });
       if (!response.ok) toast.error("Failed to fetch categories");
       const result: CategoryApiResponse = await response.json();
       setCategories(result.data?.data || []);
@@ -1678,7 +1678,7 @@ export default function ProductsDisplayPage() {
   const fetchUnits = async () => {
     setIsFetchingUnits(true);
     try {
-      const response = await fetch("http://localhost:8030/api/units", { method: "GET", headers: { "Content-Type": "application/json" } });
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/units`, { method: "GET", headers: { "Content-Type": "application/json" } });
       if (!response.ok) toast.error("Failed to fetch units");
       const result: UnitApiResponse = await response.json();
       setUnits(result.data?.data || []);
@@ -1695,7 +1695,7 @@ export default function ProductsDisplayPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await fetch(`http://localhost:8030/api/products?page=${page}&limit=${limit}`, { method: "GET", headers: { "Content-Type": "application/json" } });
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products?page=${page}&limit=${limit}`, { method: "GET", headers: { "Content-Type": "application/json" } });
       if (!response.ok) toast.error(`HTTP error! status: ${response.status}`);
       const result: ApiResponse = await response.json();
       setProducts(result.data?.data?.data || []);
@@ -1731,7 +1731,7 @@ export default function ProductsDisplayPage() {
     if (!window.confirm("Are you sure you want to delete this product? This action cannot be undone.")) return;
     const loadingToast = toast.loading("Deleting product...", { position: "top-center" });
     try {
-      const response = await fetch(`http://localhost:8030/api/products/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" } });
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" } });
       if (!response.ok) toast.error("Failed to delete product");
       setProducts((prev) => prev.filter((p) => p.id !== id));
       toast.dismiss(loadingToast);
@@ -1780,7 +1780,7 @@ export default function ProductsDisplayPage() {
         category_id: parseInt(productData.category_id.toString()),
         unit_id: parseInt(productData.unit_id.toString()),
       };
-      const response = await fetch("http://localhost:8030/api/products", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!response.ok) { const errorData = await response.json(); toast.error(errorData.message || "Failed to create product"); }
       const result: ProductCreateResponse = await response.json();
       if (result.data?.data?.id) {
@@ -1817,7 +1817,7 @@ export default function ProductsDisplayPage() {
     setIsSubmitting(true);
     try {
       await Promise.all(variants.map(async (variant) => {
-        await fetch("http://localhost:8030/api/products/productvariant", {
+        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/productvariant`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1860,7 +1860,7 @@ export default function ProductsDisplayPage() {
       const formData = new FormData();
       formData.append("product_id", createdProductId);
       selectedImages.forEach((img) => formData.append("images", img.file));
-      await fetch("http://localhost:8030/api/products/images/upload/multiple", { method: "POST", body: formData });
+      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/images/upload/multiple`, { method: "POST", body: formData });
       toast.dismiss(loadingToast);
       toast.success(`Product setup complete!`, { duration: 4000, position: "top-center" });
       handleCompleteAddProduct();

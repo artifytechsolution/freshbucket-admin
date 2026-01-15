@@ -447,7 +447,7 @@ export default function ProductVariantsPage() {
 
     try {
       const response = await fetch(
-        `http://localhost:8030/api/products/product/${productId}`,
+        `${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/product/${productId}`,
         {
           method: "GET",
           headers: {
@@ -492,7 +492,7 @@ export default function ProductVariantsPage() {
   const fetchUnits = async () => {
     setIsLoadingUnits(true);
     try {
-      const response = await fetch("http://localhost:8030/api/units", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/units`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -574,7 +574,7 @@ export default function ProductVariantsPage() {
       };
 
       const response = await fetch(
-        "http://localhost:8030/api/products/productvariant",
+        `${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/productvariant`,
         {
           method: "POST",
           headers: {
@@ -658,7 +658,7 @@ export default function ProductVariantsPage() {
       };
 
       const response = await fetch(
-        `http://localhost:8030/api/products/productvariant/${editModal.id}`,
+       `${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/productvariant/${editModal.id}`,
         {
           method: "PATCH",
           headers: {
@@ -724,7 +724,7 @@ export default function ProductVariantsPage() {
 
     try {
       const response = await fetch(
-        `http://localhost:8030/api/products/${deleteModal.id}`,
+        `${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/${deleteModal.id}`,
         {
           method: "DELETE",
           headers: {
