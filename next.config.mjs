@@ -1,7 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   webpack(config) {
     config.module.rules.push({
       test: /\.svg$/,
@@ -9,15 +7,16 @@ const nextConfig: NextConfig = {
     });
     return config;
   },
-   typescript: {
-    // !! WARN !!
-    // This will allow production builds even if there are type errors.
+
+  typescript: {
+    // ⚠️ Allows production builds even if there are type errors
     ignoreBuildErrors: true,
   },
+
   eslint: {
     // Skip ESLint checks during production build
     ignoreDuringBuilds: true,
   },
 };
 
-export default nextConfig;
+module.exports = nextConfig;
