@@ -6,7 +6,7 @@ export const apiRoutes = {
     POST: {
       query: "Login",
       method: "POST",
-      url: `${BASE_URL}/auth/login`,
+      url: `${BASE_URL}/api/auth/login`,
     },
   },
   register:{
