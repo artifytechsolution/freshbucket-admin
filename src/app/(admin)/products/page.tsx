@@ -1731,7 +1731,7 @@ export default function ProductsDisplayPage() {
     if (!window.confirm("Are you sure you want to delete this product? This action cannot be undone.")) return;
     const loadingToast = toast.loading("Deleting product...", { position: "top-center" });
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" } });
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/deleteproduct/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" } });
       if (!response.ok) toast.error("Failed to delete product");
       setProducts((prev) => prev.filter((p) => p.id !== id));
       toast.dismiss(loadingToast);

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import toast from "react-hot-toast";
 import {
   Box,
@@ -11,17 +11,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  TextField,
   Typography,
   Chip,
   CircularProgress,
   Alert,
   Grid,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  InputAdornment,
   Breadcrumbs,
   Link,
   Card,
@@ -37,10 +31,9 @@ import {
   Step,
   StepLabel,
   Avatar,
-  Divider
+  Divider,
 } from "@mui/material";
 import {
-  Search as SearchIcon,
   ShoppingCart as OrderIcon,
   AttachMoney as MoneyIcon,
   Refresh as RefreshIcon,
@@ -49,144 +42,156 @@ import {
   LocalShipping as ShippingIcon,
   Payment as PaymentIcon,
   Close as CloseIcon,
-  ContentCopy as CopyIcon,
-  ReceiptLong as ReceiptIcon,
-  LocalOffer as CouponIcon,
-  LocationOn as LocationIcon,
   Phone as PhoneIcon,
   Email as EmailIcon,
   Home as HomeIcon,
-  Work as WorkIcon
+  Work as WorkIcon,
+  Inventory2 as ProductIcon,
+  CheckCircle as DeliverIcon,
+  FiberNew as NewBadgeIcon // Using FiberNew for the icon
 } from "@mui/icons-material";
 
-// ---- Utility Function ----
-export const formatDateTime = (isoString: string | null) => {
+// ---- Utility Functions ----
+export const formatDateTime = (isoString: string | null | undefined) => {
   if (!isoString) return "-";
-  const date = new Date(isoString);
-  return new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
-  }).format(date);
+  try {
+    const date = new Date(isoString);
+    return new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    }).format(date);
+  } catch (e) {
+    return isoString;
+  }
+};
+
+const isToday = (dateString: string) => {
+  if (!dateString) return false;
+  const date = new Date(dateString);
+  const today = new Date();
+  return date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear();
 };
 
 // ---- Types ----
-interface Address {
-  fullName: string;
-  email: string;
-  phone: string;
-  addressType: string;
-  addressLine1: string;
-  addressLine2: string;
-  societyName: string;
-  societyArea: string;
-  city: string;
-  state: string;
-  pincode: string;
-  societyPincode: string;
-  isDeliveryAvailable: boolean;
-}
-
-interface Order {
-  id: string;
-  order_id: number;
-  user_id: number;
-  coupon_id: number | null;
-  totalAmount: number;
-  discount: number;
-  tax: number;
-  shippingCost: number;
-  grandTotal: number;
-  status: string;
-  paymentStatus: string;
-  paymentMethod: string;
-  shippingMethod: string | null;
-  Address: Address | null;
-  placedAt: string;
-  createdAt: string;
-  updatedAt: string;
-  cancelledAt: string | null;
-  deliveredAt: string | null;
-}
-
-interface ApiResponse {
-  status: string;
-  data: {
-    data: Order[];
-    total: number;
-  };
-  message: string;
-}
+interface Product { id?: string; product_id?: number; name?: string; sku?: string; description?: string; }
+interface Variant { id?: string; variant_id?: number; name?: string; sku?: string; product?: Product; }
+interface OrderItem { id?: string; order_item_id?: number; order_id?: number; product_id?: number; variant_id?: number; quantity?: number; price?: number; total?: number; variant?: Variant; }
+interface Address { fullName?: string; email?: string; phone?: string; addressType?: string; addressLine1?: string; addressLine2?: string; societyName?: string; societyArea?: string; city?: string; state?: string; pincode?: string; societyPincode?: string; isDeliveryAvailable?: boolean; }
+interface User { id?: string; user_id?: number; name?: string; email?: string; phone?: string; }
+interface Order { id: string; order_id: number; user_id: number; coupon_id?: number | null; totalAmount?: number; discount?: number; tax?: number; shippingCost?: number; grandTotal: number; status: string; paymentStatus: string; paymentMethod: string; shippingMethod?: string | null; Address?: Address | null; items?: OrderItem[]; user?: User | null; placedAt?: string; createdAt: string; updatedAt?: string; cancelledAt?: string | null; deliveredAt?: string | null; }
+interface Meta { page: number; limit: number; total: number; totalPages: number; }
+interface ApiResponse { status: string; data?: { data?: Order[]; meta?: Meta; }; message?: string; }
 
 // ---- Status Config ----
-const ORDER_STEPS = ['PENDING', 'CONFIRMED', 'PROCESSING', 'DELIVERED'];
+const ORDER_STEPS = ['PENDING', 'CONFIRMED', 'SHIPPED', 'DELIVERED'];
 
-const getStatusColor = (status: string) => {
-  switch (status.toUpperCase()) {
+const getStatusColor = (status?: string) => {
+  switch (status?.toUpperCase()) {
     case "CONFIRMED": return "success";
     case "PENDING": return "warning";
     case "CANCELLED": return "error";
     case "DELIVERED": return "info";
-    case "PROCESSING": return "primary";
+    case "SHIPPED": return "primary";
     default: return "default";
   }
 };
 
-const getPaymentStatusColor = (status: string) => {
-  switch (status.toUpperCase()) {
+const getPaymentStatusColor = (status?: string) => {
+  switch (status?.toUpperCase()) {
     case "PAID": return "success";
-    case "PENDING": return "warning";
+    case "UNPAID": return "warning";
     case "FAILED": return "error";
-    case "REFUNDED": return "secondary";
     default: return "default";
   }
 };
 
 export default function OrderManagementTable() {
   
-  // State
+  // ---- State Management ----
   const [orderList, setOrderList] = useState<Order[]>([]);
+  const [meta, setMeta] = useState<Meta>({ page: 1, limit: 10, total: 0, totalPages: 0 });
+  
+  // Filter State
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("all");
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState("all");
+  const [dateFilter, setDateFilter] = useState("all");
+
+  // UI State
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   
-  // Pagination
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  // Debounce Logic
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 500); 
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
-  // Fetch orders from API
-  const fetchOrders = async () => {
+  // ---- Fetch Logic ----
+  const fetchOrders = useCallback(async () => {
     setIsLoading(true);
     setIsError(false);
     
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/orders`, {
+      const params = new URLSearchParams();
+      const currentPage = meta?.page || 1;
+      const currentLimit = meta?.limit || 10;
+
+      params.append('page', currentPage.toString());
+      params.append('limit', currentLimit.toString());
+      params.append('sortBy', 'createdAt');
+      params.append('sortOrder', 'desc');
+      
+      if (debouncedSearch) params.append('search', debouncedSearch);
+      if (statusFilter !== 'all') params.append('status', statusFilter);
+      if (paymentStatusFilter !== 'all') params.append('paymentStatus', paymentStatusFilter);
+      if (dateFilter !== 'all') params.append('dateFilter', dateFilter);
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL || ''}/api/orders?${params.toString()}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
-        toast.error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const result: ApiResponse = await response.json();
-      const ordersData = result.data.data || [];
 
-      setOrderList(ordersData);
-      
-      toast.success(`Updated: ${ordersData.length} orders loaded`, {
-        id: 'order-fetch',
-        icon: '🔄',
-      });
+      if(result?.status === "success") {
+          let rawData = result?.data?.data || [];
+          
+          // ---- CUSTOM SORTING LOGIC ----
+          // Priority: 1. Status='CONFIRMED', 2. Date Descending
+          const sortedData = rawData.sort((a, b) => {
+            const isAConfirmed = a.status === 'CONFIRMED';
+            const isBConfirmed = b.status === 'CONFIRMED';
+
+            if (isAConfirmed && !isBConfirmed) return -1;
+            if (!isAConfirmed && isBConfirmed) return 1;
+            
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          });
+
+          setOrderList(sortedData);
+          const metaData = result?.data?.meta || { page: 1, limit: 10, total: 0, totalPages: 0 };
+          setMeta(metaData);
+          toast.success("Orders synced", { id: 'sync-success', duration: 2000 });
+      } else {
+        throw new Error(result?.message || "Failed to fetch orders");
+      }
 
     } catch (error) {
       console.error("Orders fetch error:", error);
@@ -197,49 +202,20 @@ export default function OrderManagementTable() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [meta?.page, meta?.limit, debouncedSearch, statusFilter, paymentStatusFilter, dateFilter]);
 
   useEffect(() => {
     fetchOrders();
-  }, []);
+  }, [fetchOrders]);
 
-  // Filtering Logic
-  const uniqueStatuses = useMemo(() => [...new Set(orderList.map(order => order.status))], [orderList]);
-  const uniquePaymentStatuses = useMemo(() => [...new Set(orderList.map(order => order.paymentStatus))], [orderList]);
-  const uniquePaymentMethods = useMemo(() => [...new Set(orderList.map(order => order.paymentMethod))], [orderList]);
+  // ---- Handlers ----
+  const handlePageChange = (event: unknown, newPage: number) => {
+    setMeta(prev => ({ ...prev, page: newPage + 1 }));
+  };
 
-  const filteredOrders = useMemo(() => {
-    return orderList.filter(order => {
-      const orderId = order.order_id.toString();
-      const userId = order.user_id.toString();
-      
-      const matchesSearch = 
-        orderId.includes(searchQuery) ||
-        userId.includes(searchQuery) ||
-        order.status.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (order.Address?.fullName || "").toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const matchesStatus = statusFilter === "all" || order.status === statusFilter;
-      const matchesPaymentStatus = paymentStatusFilter === "all" || order.paymentStatus === paymentStatusFilter;
-      const matchesPaymentMethod = paymentMethodFilter === "all" || order.paymentMethod === paymentMethodFilter;
-      
-      return matchesSearch && matchesStatus && matchesPaymentStatus && matchesPaymentMethod;
-    });
-  }, [orderList, searchQuery, statusFilter, paymentStatusFilter, paymentMethodFilter]);
-
-  const paginatedOrders = useMemo(() => {
-    const startIndex = page * rowsPerPage;
-    return filteredOrders.slice(startIndex, startIndex + rowsPerPage);
-  }, [filteredOrders, page, rowsPerPage]);
-
-  // Handlers
-  const handleReset = () => {
-    setSearchQuery("");
-    setStatusFilter("all");
-    setPaymentStatusFilter("all");
-    setPaymentMethodFilter("all");
-    setPage(0);
-    toast.success("Filters cleared");
+  const handleRowsPerPageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newLimit = parseInt(event.target.value, 10);
+    setMeta(prev => ({ ...prev, limit: newLimit, page: 1 }));
   };
 
   const handleViewDetails = (order: Order) => {
@@ -247,14 +223,37 @@ export default function OrderManagementTable() {
     setDetailsDialogOpen(true);
   };
 
-  // Stats Calculation
-  const totalRevenue = filteredOrders.reduce((sum, order) => sum + (order.grandTotal || 0), 0);
-  const pendingOrders = filteredOrders.filter(o => o.status === 'PENDING').length;
+  const handleMarkDelivered = async (orderId: number) => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL || ''}/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: "DELIVERED"
+        })
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        toast.success(`Order #${orderId} marked as Delivered`);
+        fetchOrders();
+      } else {
+        throw new Error(result.message || "Failed to update status");
+      }
+    } catch (error) {
+      console.error("Update error:", error);
+      toast.error("Failed to update order status");
+    }
+  };
+
+  // Safe Math
+  const totalRevenue = orderList.reduce((sum, order) => sum + (order.grandTotal || 0), 0);
 
   return (
     <Box sx={{ p: { xs: 2, md: 4 }, backgroundColor: '#f8fafc', minHeight: '100vh' }}>
       
-      {/* ---- Header & Breadcrumbs ---- */}
+      {/* ---- Header ---- */}
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Breadcrumbs sx={{ mb: 1, fontSize: '0.875rem' }}>
@@ -275,7 +274,6 @@ export default function OrderManagementTable() {
           sx={{ 
             textTransform: 'none', 
             borderRadius: 2,
-            boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)',
             background: 'linear-gradient(45deg, #4f46e5, #6366f1)'
           }}
         >
@@ -286,29 +284,24 @@ export default function OrderManagementTable() {
       {/* ---- Stats Cards ---- */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {[
-          { label: "Total Orders", value: filteredOrders.length, icon: <OrderIcon />, color: '#3b82f6', bg: '#eff6ff' },
-          { label: "Total Revenue", value: `₹${totalRevenue.toLocaleString()}`, icon: <MoneyIcon />, color: '#10b981', bg: '#ecfdf5' },
-          { label: "Pending Processing", value: pendingOrders, icon: <ShippingIcon />, color: '#f59e0b', bg: '#fffbeb' },
-          { label: "Avg. Order Value", value: filteredOrders.length ? `₹${(totalRevenue / filteredOrders.length).toFixed(0)}` : '0', icon: <PaymentIcon />, color: '#8b5cf6', bg: '#f5f3ff' }
+          { label: "Total Orders (Found)", value: meta?.total || 0, icon: <OrderIcon />, color: '#3b82f6', bg: '#eff6ff' },
+          { label: "Revenue (Visible)", value: `₹${totalRevenue.toLocaleString()}`, icon: <MoneyIcon />, color: '#10b981', bg: '#ecfdf5' },
+          { label: "Pending (Page)", value: orderList.filter(o => o?.status === 'PENDING').length, icon: <ShippingIcon />, color: '#f59e0b', bg: '#fffbeb' },
+          { label: "Avg Value (Page)", value: orderList.length ? `₹${(totalRevenue / orderList.length).toFixed(0)}` : '0', icon: <PaymentIcon />, color: '#8b5cf6', bg: '#f5f3ff' }
         ].map((stat, index) => (
           <Grid item xs={12} sm={6} md={3} key={index}>
-            <Card elevation={0} sx={{ 
-              border: '1px solid #e2e8f0', 
-              borderRadius: 3,
-              transition: 'transform 0.2s',
-              '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.05)' }
-            }}>
+            <Card elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 3 }}>
               <CardContent sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                   <Box>
-                    <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <Typography variant="body2" fontWeight={600} color="text.secondary" sx={{ textTransform: 'uppercase' }}>
                       {stat.label}
                     </Typography>
                     <Typography variant="h4" fontWeight={700} sx={{ mt: 1, color: '#1e293b' }}>
                       {stat.value}
                     </Typography>
                   </Box>
-                  <Box sx={{ p: 1.5, borderRadius: 2, backgroundColor: stat.bg, color: stat.color, display: 'flex' }}>
+                  <Box sx={{ p: 1.5, borderRadius: 2, backgroundColor: stat.bg, color: stat.color }}>
                     {stat.icon}
                   </Box>
                 </Box>
@@ -318,49 +311,9 @@ export default function OrderManagementTable() {
         ))}
       </Grid>
 
-      {/* ---- Filters & Table Section ---- */}
+      {/* ---- Table Section ---- */}
       <Paper elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
-        <Box sx={{ p: 3, borderBottom: '1px solid #f1f5f9', backgroundColor: '#fff' }}>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                placeholder="Search by ID, User, or Name..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                InputProps={{
-                  startAdornment: <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>,
-                  sx: { borderRadius: 2, backgroundColor: '#f8fafc' }
-                }}
-                size="small"
-              />
-            </Grid>
-            <Grid item xs={6} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Status</InputLabel>
-                <Select value={statusFilter} label="Status" onChange={(e) => setStatusFilter(e.target.value)}>
-                  <MenuItem value="all">All</MenuItem>
-                  {uniqueStatuses.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={6} md={2}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Payment</InputLabel>
-                <Select value={paymentStatusFilter} label="Payment" onChange={(e) => setPaymentStatusFilter(e.target.value)}>
-                  <MenuItem value="all">All</MenuItem>
-                  {uniquePaymentStatuses.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={4} sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-               <Button onClick={handleReset} color="inherit" size="small" startIcon={<CloseIcon />}>
-                 Clear
-               </Button>
-            </Grid>
-          </Grid>
-        </Box>
-
+        
         {isLoading ? (
           <Box sx={{ p: 10, display: 'flex', justifyContent: 'center', flexDirection: 'column', alignItems: 'center' }}>
             <CircularProgress size={40} thickness={4} />
@@ -384,255 +337,422 @@ export default function OrderManagementTable() {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {paginatedOrders.length > 0 ? paginatedOrders.map((order) => (
-                    <TableRow key={order.id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
-                      <TableCell>
-                        <Typography fontWeight={700} color="primary" variant="body2">
-                          #{order.order_id}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                          <Avatar sx={{ width: 28, height: 28, fontSize: '0.75rem', bgcolor: '#e2e8f0', color: '#475569' }}>
-                            {order.Address?.fullName ? order.Address.fullName.charAt(0).toUpperCase() : 'U'}
-                          </Avatar>
-                          <Box>
-                             <Typography variant="body2" fontWeight={500}>
-                                {order.Address?.fullName || `User ${order.user_id}`}
-                             </Typography>
-                             <Typography variant="caption" color="text.secondary" display="block">
-                                {order.Address?.city || 'N/A'}
-                             </Typography>
-                          </Box>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                          <Typography variant="body2" fontWeight={500}>{new Date(order.placedAt).toLocaleDateString()}</Typography>
-                          <Typography variant="caption" color="text.secondary">{new Date(order.placedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Chip label={order.status} size="small" color={getStatusColor(order.status)} sx={{ fontWeight: 600, borderRadius: 1.5, height: 24 }} />
-                      </TableCell>
-                      <TableCell>
-                        <Chip label={order.paymentStatus} size="small" color={getPaymentStatusColor(order.paymentStatus)} variant="outlined" sx={{ fontWeight: 600, border: 'none', bgcolor: '#f1f5f9' }} />
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                           <Typography variant="caption" sx={{ border: '1px solid #e2e8f0', px: 1, py: 0.5, borderRadius: 1 }}>
-                             {order.paymentMethod}
-                           </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell>
-                        <Typography fontWeight={600} color="success.main">
-                          ₹{order.grandTotal.toLocaleString()}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View Details">
-                          <IconButton onClick={() => handleViewDetails(order)} color="primary" size="small" sx={{ bgcolor: '#eef2ff' }}>
-                            <ViewIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  )) : (
+                  {orderList && orderList.length > 0 ? (
+                    orderList.map((order) => {
+                      
+                      // ---- CORE LOGIC FOR NEW ORDERS ----
+                      // 1. Must be TODAY
+                      const isCreatedToday = isToday(order.createdAt);
+                      // 2. Must be CONFIRMED status
+                      const isNewAndConfirmed = order.status === 'CONFIRMED' && isCreatedToday;
+                      
+                      return (
+                        <TableRow 
+                          key={order?.id} 
+                          hover 
+                          sx={{ 
+                            '&:last-child td, &:last-child th': { border: 0 },
+                            // Highlight Green for Confirmed New Orders
+                            backgroundColor: isNewAndConfirmed ? '#F0FDF4' : 'inherit', 
+                            transition: 'background-color 0.3s',
+                            position: 'relative',
+                            // Left border indicator (Green)
+                            '&::before': isNewAndConfirmed ? {
+                              content: '""',
+                              position: 'absolute',
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: '4px',
+                              backgroundColor: '#22C55E' 
+                            } : {}
+                          }}
+                        >
+                          {/* Order ID + NEW ICON */}
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <Typography fontWeight={700} color="primary" variant="body2">
+                                  #{order?.order_id}
+                                </Typography>
+                                
+                                {/* ---- NEW ICON DISPLAY ---- */}
+                                {/* Only show if CONFIRMED + TODAY */}
+                                {isNewAndConfirmed && (
+                                  <Chip 
+                                    icon={<NewBadgeIcon sx={{ '&&': { color: '#166534' }, fontSize: '1.2rem' }} />}
+                                    label="NEW" 
+                                    size="small" 
+                                    sx={{ 
+                                      height: 22, 
+                                      fontSize: '0.65rem', 
+                                      fontWeight: 800,
+                                      pl: 0,
+                                      backgroundColor: '#DCFCE7',
+                                      color: '#166534',
+                                      animation: 'pulse 2s infinite',
+                                      '@keyframes pulse': {
+                                        '0%': { opacity: 0.8 },
+                                        '50%': { opacity: 1 },
+                                        '100%': { opacity: 0.8 }
+                                      }
+                                    }} 
+                                  />
+                                )}
+                            </Box>
+                            <Typography variant="caption" color="text.secondary" sx={{fontSize: '0.65rem', display: 'block'}}>
+                              {order?.id?.slice(0,8)}...
+                            </Typography>
+                          </TableCell>
+
+                          {/* Customer */}
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                              <Avatar sx={{ width: 28, height: 28, fontSize: '0.75rem', bgcolor: '#e2e8f0', color: '#475569' }}>
+                                {order?.Address?.fullName ? order.Address.fullName.charAt(0).toUpperCase() : (order?.user?.name ? order.user.name.charAt(0).toUpperCase() : 'U')}
+                              </Avatar>
+                              <Box>
+                                <Typography variant="body2" fontWeight={500}>
+                                    {order?.Address?.fullName || order?.user?.name || `User ${order?.user_id}`}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block">
+                                    {order?.Address?.city || 'N/A'}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          </TableCell>
+
+                          {/* Date */}
+                          <TableCell>
+                            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                              <Typography variant="body2" fontWeight={500}>{new Date(order?.createdAt).toLocaleDateString()}</Typography>
+                              <Typography variant="caption" color="text.secondary">{new Date(order?.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</Typography>
+                            </Box>
+                          </TableCell>
+
+                          {/* Status */}
+                          <TableCell>
+                            <Chip label={order?.status} size="small" color={getStatusColor(order?.status)} sx={{ fontWeight: 600, borderRadius: 1.5, height: 24 }} />
+                          </TableCell>
+
+                          {/* Payment */}
+                          <TableCell>
+                            <Chip label={order?.paymentStatus} size="small" color={getPaymentStatusColor(order?.paymentStatus)} variant="outlined" sx={{ fontWeight: 600, border: 'none', bgcolor: '#f1f5f9' }} />
+                          </TableCell>
+
+                          {/* Method */}
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography variant="caption" sx={{ border: '1px solid #e2e8f0', px: 1, py: 0.5, borderRadius: 1 }}>
+                                {order?.paymentMethod}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+
+                          {/* Total */}
+                          <TableCell>
+                            <Typography fontWeight={600} color="success.main">
+                              ₹{(order?.grandTotal || 0).toLocaleString()}
+                            </Typography>
+                          </TableCell>
+
+                          {/* Actions */}
+                          <TableCell>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                              {order?.status !== 'DELIVERED' && order?.status !== 'CANCELLED' && (
+                                <Tooltip title="Mark as Delivered">
+                                  <IconButton 
+                                    onClick={() => handleMarkDelivered(order.order_id)} 
+                                    color="success" 
+                                    size="small" 
+                                    sx={{ bgcolor: '#ecfdf5', '&:hover': { bgcolor: '#d1fae5' } }}
+                                  >
+                                    <DeliverIcon fontSize="small" />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
+
+                              <Tooltip title="View Details">
+                                <IconButton onClick={() => handleViewDetails(order)} color="primary" size="small" sx={{ bgcolor: '#eef2ff' }}>
+                                  <ViewIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  ) : (
                     <TableRow>
                       <TableCell colSpan={8} align="center" sx={{ py: 8 }}>
                         <OrderIcon sx={{ fontSize: 48, color: '#cbd5e1', mb: 1 }} />
-                        <Typography color="text.secondary">No orders found matching your filters.</Typography>
+                        <Typography color="text.secondary">No orders found.</Typography>
                       </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
               </Table>
             </TableContainer>
+            
             <TablePagination
               component="div"
-              count={filteredOrders.length}
-              page={page}
-              onPageChange={(e, n) => setPage(n)}
-              rowsPerPage={rowsPerPage}
-              onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+              count={meta?.total || 0}
+              page={(meta?.page || 1) - 1}
+              onPageChange={handlePageChange}
+              rowsPerPage={meta?.limit || 10}
+              onRowsPerPageChange={handleRowsPerPageChange}
               rowsPerPageOptions={[5, 10, 25, 50]}
             />
           </>
         )}
       </Paper>
 
-      {/* ---- Detailed Order Dialog (Invoice Style) ---- */}
+      {/* ---- Detailed Order Dialog ---- */}
       <Dialog 
         open={detailsDialogOpen} 
         onClose={() => setDetailsDialogOpen(false)} 
-        maxWidth="md" 
+        maxWidth="lg"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 3, overflow: 'hidden' } }}
+        PaperProps={{ 
+          sx: { 
+            borderRadius: 4, 
+            overflow: 'hidden',
+            bgcolor: '#F8FAFC',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' 
+          } 
+        }}
       >
         {selectedOrder && (
           <>
-            {/* Modal Header */}
-            <Box sx={{ bgcolor: '#f8fafc', p: 3, borderBottom: '1px solid #e2e8f0' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
-                <Box>
-                  <Typography variant="overline" color="text.secondary" fontWeight={700}>ORDER #{selectedOrder.order_id}</Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-                    <Typography variant="h5" fontWeight={700}>
-                       ₹{selectedOrder.grandTotal.toLocaleString()}
-                    </Typography>
-                    <Chip 
-                      label={selectedOrder.paymentStatus} 
-                      size="small" 
-                      color={getPaymentStatusColor(selectedOrder.paymentStatus)}
-                      sx={{ height: 20, fontSize: '0.65rem' }} 
-                    />
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                    Placed on {formatDateTime(selectedOrder.placedAt)}
+            {/* ---- HEADER SECTION ---- */}
+            <Box sx={{ bgcolor: '#fff', p: 3, borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                  <Typography variant="h5" fontWeight={800} color="#1E293B">
+                    Order #{selectedOrder.order_id}
                   </Typography>
+                  <Chip 
+                    label={selectedOrder.status} 
+                    color={getStatusColor(selectedOrder.status)}
+                    size="small"
+                    sx={{ fontWeight: 700, borderRadius: 2, px: 1 }}
+                  />
+                  <Chip 
+                    label={selectedOrder.paymentStatus} 
+                    variant="outlined"
+                    color={getPaymentStatusColor(selectedOrder.paymentStatus)}
+                    size="small"
+                    sx={{ fontWeight: 700, borderRadius: 2 }}
+                  />
                 </Box>
-                <IconButton onClick={() => setDetailsDialogOpen(false)}><CloseIcon /></IconButton>
+                <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  <CalendarIcon fontSize="small" sx={{ fontSize: 16 }} />
+                  Placed on {formatDateTime(selectedOrder.placedAt)}
+                </Typography>
               </Box>
+              <IconButton onClick={() => setDetailsDialogOpen(false)} sx={{ bgcolor: '#F1F5F9', '&:hover': { bgcolor: '#E2E8F0' } }}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
 
-              <Stepper activeStep={ORDER_STEPS.indexOf(selectedOrder.status) + 1} alternativeLabel>
+            {/* ---- PROGRESS STEPPER ---- */}
+            <Box sx={{ bgcolor: '#fff', px: 4, py: 3, borderBottom: '1px solid #E2E8F0' }}>
+              <Stepper activeStep={ORDER_STEPS.indexOf(selectedOrder?.status || 'PENDING') + 1} alternativeLabel>
                 {ORDER_STEPS.map((label) => (
                   <Step key={label}>
-                    <StepLabel StepIconProps={{ sx: { '&.Mui-active': { color: 'primary.main' }, '&.Mui-completed': { color: 'success.main' } } }}>
-                      <Typography variant="caption" fontWeight={600}>{label}</Typography>
+                    <StepLabel StepIconProps={{ 
+                      sx: { 
+                        '&.Mui-active': { color: '#4F46E5' }, 
+                        '&.Mui-completed': { color: '#10B981' } 
+                      } 
+                    }}>
+                      <Typography variant="caption" fontWeight={600} color={ORDER_STEPS.indexOf(selectedOrder?.status || '') >= ORDER_STEPS.indexOf(label) ? 'text.primary' : 'text.disabled'}>
+                        {label}
+                      </Typography>
                     </StepLabel>
                   </Step>
                 ))}
               </Stepper>
             </Box>
 
-            <DialogContent sx={{ p: 0 }}>
-              <Grid container>
-                {/* Left Column: Financials & Timeline */}
-                <Grid item xs={12} md={7} sx={{ p: 3 }}>
-                   <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                     <ReceiptIcon fontSize="small" color="primary" /> Invoice Details
-                   </Typography>
-                   
-                   <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', mb: 4 }}>
-                      <Table size="small">
+            <DialogContent sx={{ p: 3 }}>
+              <Grid container spacing={3}>
+                
+                {/* ---- LEFT COLUMN: ITEMS & FINANCIALS ---- */}
+                <Grid item xs={12} md={8}>
+                  
+                  {/* Items Card */}
+                  <Paper elevation={0} sx={{ borderRadius: 3, border: '1px solid #E2E8F0', overflow: 'hidden', mb: 3, bgcolor: '#fff' }}>
+                    <Box sx={{ p: 2, bgcolor: '#fff', borderBottom: '1px solid #F1F5F9' }}>
+                      <Typography variant="subtitle2" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <ProductIcon fontSize="small" color="primary" /> 
+                        Order Items ({selectedOrder.items?.length || 0})
+                      </Typography>
+                    </Box>
+                    
+                    <TableContainer>
+                      <Table sx={{ minWidth: 500 }}>
+                        <TableHead sx={{ bgcolor: '#F8FAFC' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 600, color: '#64748B', fontSize: '0.75rem', py: 1.5 }}>PRODUCT</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 600, color: '#64748B', fontSize: '0.75rem', py: 1.5 }}>UNIT PRICE</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 600, color: '#64748B', fontSize: '0.75rem', py: 1.5 }}>QTY</TableCell>
+                            <TableCell align="right" sx={{ fontWeight: 600, color: '#64748B', fontSize: '0.75rem', py: 1.5 }}>TOTAL</TableCell>
+                          </TableRow>
+                        </TableHead>
                         <TableBody>
-                          <TableRow>
-                            <TableCell sx={{ color: 'text.secondary' }}>Subtotal</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 500 }}>₹{selectedOrder.totalAmount.toLocaleString()}</TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell sx={{ color: 'text.secondary' }}>Shipping</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 500 }}>₹{selectedOrder.shippingCost.toLocaleString()}</TableCell>
-                          </TableRow>
-                          <TableRow>
-                            <TableCell sx={{ color: 'text.secondary' }}>Tax</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 500 }}>₹{selectedOrder.tax.toLocaleString()}</TableCell>
-                          </TableRow>
-                          {selectedOrder.discount > 0 && (
-                            <TableRow sx={{ bgcolor: '#f0fdf4' }}>
-                              <TableCell sx={{ color: 'success.main', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <CouponIcon fontSize="inherit" /> Discount
-                              </TableCell>
-                              <TableCell align="right" sx={{ color: 'success.main', fontWeight: 600 }}>-₹{selectedOrder.discount.toLocaleString()}</TableCell>
-                            </TableRow>
+                          {selectedOrder.items && selectedOrder.items.length > 0 ? (
+                            selectedOrder.items.map((item) => (
+                              <TableRow key={item?.id} hover>
+                                <TableCell sx={{ py: 2 }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+                                    <Box sx={{ 
+                                      width: 40, height: 40, 
+                                      borderRadius: 2, 
+                                      bgcolor: '#EEF2FF', 
+                                      color: '#4F46E5', 
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      fontWeight: 700, fontSize: '1rem'
+                                    }}>
+                                      {(item?.variant?.product?.name || "P").charAt(0).toUpperCase()}
+                                    </Box>
+                                    <Box>
+                                      <Typography variant="body2" fontWeight={600} color="#1E293B">
+                                        {item?.variant?.product?.name || `Product #${item?.product_id}`}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        {item?.variant?.name}
+                                        {item?.variant?.sku && (
+                                          <Chip label={item.variant.sku} size="small" sx={{ height: 16, fontSize: '0.6rem', bgcolor: '#F1F5F9' }} />
+                                        )}
+                                      </Typography>
+                                    </Box>
+                                  </Box>
+                                </TableCell>
+                                <TableCell align="center" sx={{ color: '#64748B' }}>₹{item?.price}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 600 }}>x{item?.quantity}</TableCell>
+                                <TableCell align="right" sx={{ fontWeight: 600, color: '#1E293B' }}>₹{item?.total}</TableCell>
+                              </TableRow>
+                            ))
+                          ) : (
+                            <TableRow><TableCell colSpan={4} align="center">No items found.</TableCell></TableRow>
                           )}
-                          <TableRow sx={{ '& td': { borderBottom: 0, fontSize: '1rem', py: 2 } }}>
-                            <TableCell sx={{ fontWeight: 700 }}>Total</TableCell>
-                            <TableCell align="right" sx={{ fontWeight: 700, color: 'primary.main' }}>₹{selectedOrder.grandTotal.toLocaleString()}</TableCell>
-                          </TableRow>
                         </TableBody>
                       </Table>
-                   </Paper>
+                    </TableContainer>
+                  </Paper>
 
-                   <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                     <CalendarIcon fontSize="small" color="primary" /> Timeline
-                   </Typography>
-                   <Grid container spacing={2}>
-                      <Grid item xs={6}>
-                         <Paper sx={{ p: 1.5, bgcolor: '#f8fafc', border: '1px solid #f1f5f9' }} elevation={0}>
-                            <Typography variant="caption" color="text.secondary" display="block">Created At</Typography>
-                            <Typography variant="body2" fontWeight={500}>{formatDateTime(selectedOrder.createdAt)}</Typography>
-                         </Paper>
-                      </Grid>
-                      <Grid item xs={6}>
-                         <Paper sx={{ p: 1.5, bgcolor: '#f8fafc', border: '1px solid #f1f5f9' }} elevation={0}>
-                            <Typography variant="caption" color="text.secondary" display="block">Last Updated</Typography>
-                            <Typography variant="body2" fontWeight={500}>{formatDateTime(selectedOrder.updatedAt)}</Typography>
-                         </Paper>
-                      </Grid>
-                   </Grid>
+                  {/* Financial Breakdown */}
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Paper elevation={0} sx={{ width: { xs: '100%', sm: 300 }, borderRadius: 3, border: '1px solid #E2E8F0', p: 2.5, bgcolor: '#fff' }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
+                        <Typography variant="body2" color="text.secondary">Subtotal</Typography>
+                        <Typography variant="body2" fontWeight={600}>₹{(selectedOrder.totalAmount || 0).toLocaleString()}</Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
+                        <Typography variant="body2" color="text.secondary">Shipping</Typography>
+                        <Typography variant="body2" fontWeight={600}>
+                          {selectedOrder.shippingCost ? `₹${selectedOrder.shippingCost}` : 'Free'}
+                        </Typography>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5 }}>
+                        <Typography variant="body2" color="text.secondary">Tax</Typography>
+                        <Typography variant="body2" fontWeight={600}>₹{(selectedOrder.tax || 0).toLocaleString()}</Typography>
+                      </Box>
+                      {(selectedOrder.discount || 0) > 0 && (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, color: 'success.main' }}>
+                          <Typography variant="body2" fontWeight={500}>Discount</Typography>
+                          <Typography variant="body2" fontWeight={700}>-₹{(selectedOrder.discount || 0).toLocaleString()}</Typography>
+                        </Box>
+                      )}
+                      
+                      <Divider sx={{ my: 1.5, borderStyle: 'dashed' }} />
+                      
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography variant="subtitle1" fontWeight={700} color="#1E293B">Total</Typography>
+                        <Typography variant="h6" fontWeight={800} color="#4F46E5">
+                          ₹{(selectedOrder.grandTotal || 0).toLocaleString()}
+                        </Typography>
+                      </Box>
+                    </Paper>
+                  </Box>
                 </Grid>
 
-                {/* Right Column: Address & Customer */}
-                <Grid item xs={12} md={5} sx={{ bgcolor: '#f8fafc', borderLeft: '1px solid #e2e8f0', p: 3 }}>
-                    
-                    {/* Customer Info */}
-                    <Box sx={{ mb: 4 }}>
-                      <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2 }}>CUSTOMER</Typography>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Avatar sx={{ width: 40, height: 40, bgcolor: 'primary.main' }}>
-                          {selectedOrder.Address?.fullName ? selectedOrder.Address.fullName.charAt(0).toUpperCase() : 'U'}
-                        </Avatar>
-                        <Box>
-                          <Typography variant="body2" fontWeight={700}>
-                            {selectedOrder.Address?.fullName || `User ${selectedOrder.user_id}`}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">ID: {selectedOrder.user_id}</Typography>
-                        </Box>
+                {/* ---- RIGHT COLUMN: SIDEBAR INFO ---- */}
+                <Grid item xs={12} md={4}>
+                  
+                  {/* Customer Card */}
+                  <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #E2E8F0', bgcolor: '#fff', mb: 3 }}>
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2, color: '#94A3B8', fontSize: '0.75rem', letterSpacing: 0.5 }}>
+                      CUSTOMER DETAILS
+                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+                      <Avatar sx={{ width: 48, height: 48, bgcolor: '#F1F5F9', color: '#64748B', fontWeight: 700 }}>
+                        {selectedOrder.Address?.fullName ? selectedOrder.Address.fullName.charAt(0).toUpperCase() : 'U'}
+                      </Avatar>
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight={700} color="#1E293B">
+                          {selectedOrder.Address?.fullName || selectedOrder.user?.name || "Unknown User"}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          ID: {selectedOrder.user_id}
+                        </Typography>
                       </Box>
                     </Box>
 
-                    {/* Shipping Address Card */}
-                    <Box sx={{ mb: 4 }}>
-                       <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2 }}>SHIPPING ADDRESS</Typography>
-                       {selectedOrder.Address ? (
-                         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: '#fff' }}>
-                            <Box sx={{ display: 'flex', gap: 1.5, mb: 1 }}>
-                                {selectedOrder.Address.addressType === 'home' ? <HomeIcon color="action" fontSize="small"/> : <WorkIcon color="action" fontSize="small"/>}
-                                <Typography variant="caption" sx={{ textTransform: 'uppercase', fontWeight: 700, color: 'text.secondary', mt: 0.3 }}>
-                                  {selectedOrder.Address.addressType}
-                                </Typography>
-                            </Box>
-                            
-                            <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>
-                              {selectedOrder.Address.fullName}
-                            </Typography>
-                            
-                            <Box sx={{ display: 'flex', gap: 1, mb: 0.5 }}>
-                              <LocationIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: '1rem', mt: 0.3 }} />
-                              <Typography variant="body2" color="text.secondary">
-                                {selectedOrder.Address.societyName}, {selectedOrder.Address.societyArea} <br />
-                                {selectedOrder.Address.addressLine1} <br />
-                                {selectedOrder.Address.city}, {selectedOrder.Address.state} - {selectedOrder.Address.pincode}
-                              </Typography>
-                            </Box>
-
-                            <Divider sx={{ my: 1.5 }} />
-
-                            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <PhoneIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: '1rem' }} />
-                                <Typography variant="body2">{selectedOrder.Address.phone}</Typography>
-                              </Box>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <EmailIcon fontSize="small" sx={{ color: 'text.disabled', fontSize: '1rem' }} />
-                                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>{selectedOrder.Address.email}</Typography>
-                              </Box>
-                            </Box>
-                         </Paper>
-                       ) : (
-                         <Typography variant="body2" color="text.secondary" fontStyle="italic">No address provided.</Typography>
-                       )}
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                       <Box sx={{ display: 'flex', gap: 1.5 }}>
+                          <PhoneIcon fontSize="small" sx={{ color: '#94A3B8', mt: 0.2 }} />
+                          <Typography variant="body2" color="#334155" fontWeight={500}>
+                            {selectedOrder.Address?.phone || selectedOrder.user?.phone || 'N/A'}
+                          </Typography>
+                       </Box>
+                       <Box sx={{ display: 'flex', gap: 1.5 }}>
+                          <EmailIcon fontSize="small" sx={{ color: '#94A3B8', mt: 0.2 }} />
+                          <Typography variant="body2" color="#334155" sx={{ wordBreak: 'break-all' }}>
+                            {selectedOrder.Address?.email || selectedOrder.user?.email || 'N/A'}
+                          </Typography>
+                       </Box>
                     </Box>
+                  </Paper>
+
+                  {/* Shipping Card */}
+                  <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #E2E8F0', bgcolor: '#fff' }}>
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2, color: '#94A3B8', fontSize: '0.75rem', letterSpacing: 0.5 }}>
+                      SHIPPING ADDRESS
+                    </Typography>
+                    
+                    {selectedOrder.Address ? (
+                      <Box sx={{ position: 'relative' }}>
+                        <Box sx={{ position: 'absolute', left: 0, top: 4, bottom: 4, width: 3, bgcolor: '#CBD5E1', borderRadius: 4 }} />
+                        <Box sx={{ pl: 2.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            {selectedOrder.Address.addressType === 'home' ? <HomeIcon fontSize="small" color="action"/> : <WorkIcon fontSize="small" color="action"/>}
+                            <Typography variant="caption" fontWeight={700} sx={{ textTransform: 'uppercase', color: '#64748B' }}>
+                              {selectedOrder.Address.addressType}
+                            </Typography>
+                          </Box>
+
+                          <Typography variant="body2" color="#334155" lineHeight={1.6}>
+                            {selectedOrder.Address.addressLine1} <br />
+                            {selectedOrder.Address.societyName}, {selectedOrder.Address.societyArea} <br />
+                            <Typography component="span" fontWeight={600}>
+                              {selectedOrder.Address.city}, {selectedOrder.Address.state} - {selectedOrder.Address.pincode}
+                            </Typography>
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary" fontStyle="italic">No address provided.</Typography>
+                    )}
+                  </Paper>
+
                 </Grid>
               </Grid>
             </DialogContent>
-            
-            <DialogActions sx={{ p: 2, borderTop: '1px solid #e2e8f0' }}>
-               <Button onClick={() => setDetailsDialogOpen(false)} color="inherit">Close</Button>
-               <Button variant="contained" startIcon={<CopyIcon />} onClick={() => navigator.clipboard.writeText(selectedOrder.id)}>
-                 Copy UUID
+
+            <DialogActions sx={{ p: 3, bgcolor: '#F8FAFC', borderTop: '1px solid #E2E8F0' }}>
+               <Button onClick={() => setDetailsDialogOpen(false)} sx={{ color: '#64748B', fontWeight: 600 }}>
+                 Close
                </Button>
             </DialogActions>
           </>
