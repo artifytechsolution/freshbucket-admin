@@ -1747,7 +1747,7 @@ export default function ProductsDisplayPage() {
     return images.find((img) => img.isPrimary)?.url || images[0]?.url || "https://via.placeholder.com/80?text=No+Image";
   };
 
-  // ===================== FORM HANDLERS =====================
+  // ===================== STEP 1: CREATE PRODUCT LOGIC =====================
   const handleProductChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     if (type === "checkbox") {
@@ -1797,50 +1797,82 @@ export default function ProductsDisplayPage() {
     }
   };
 
+  // ===================== STEP 2: OPTIMIZED VARIANT LOGIC =====================
   const handleVariantChange = (index: number, e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
     const updatedVariants = [...variants];
-    updatedVariants[index] = { ...updatedVariants[index], [e.target.name]: e.target.value };
+    updatedVariants[index] = { ...updatedVariants[index], [name]: value };
     setVariants(updatedVariants);
   };
 
   const addVariant = () => setVariants([...variants, { ...initialVariantData }]);
+  
   const removeVariant = (index: number) => {
     if (variants.length === 1) { toast.error("At least one variant is required"); return; }
     setVariants(variants.filter((_, i) => i !== index));
   };
 
   const handleCreateVariants = async () => {
-    for (const v of variants) {
-       if(!v.name || !v.sku || !v.price || !v.stock || !v.unit_id) { toast.error("Please fill all variant fields"); return; }
+    // 1. Prevent Double Submission
+    if (isSubmitting) return;
+
+    // 2. Validate empty fields
+    const hasEmptyFields = variants.some(v => !v.name || !v.sku || !v.price || !v.stock || !v.unit_id);
+    if(hasEmptyFields) { 
+        toast.error("Please fill all fields for every variant."); 
+        return; 
     }
-    const loadingToast = toast.loading("Creating variants...", { position: "top-center" });
+
+    // 3. Validate Duplicate SKUs locally
+    const skus = variants.map(v => v.sku.trim().toLowerCase());
+    const uniqueSkus = new Set(skus);
+    if(uniqueSkus.size !== skus.length) {
+        toast.error("Duplicate SKUs detected inside this list. SKUs must be unique.");
+        return;
+    }
+
     setIsSubmitting(true);
+    const loadingToast = toast.loading("Saving variants...", { position: "top-center" });
+
     try {
-      await Promise.all(variants.map(async (variant) => {
-        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/productvariant`, {
+      // 4. Create Array of Promises
+      const variantRequests = variants.map((variant) => {
+        return fetch(`${process.env.NEXT_PUBLIC_BACKEND_BASE_URL}/api/products/productvariant`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             product_id: createdProductId,
-            name: variant.name,
+            name: variant.name.trim(),
             unit_id: parseInt(variant.unit_id.toString()),
-            sku: variant.sku,
+            sku: variant.sku.trim(),
             price: parseFloat(variant.price.toString()),
             stock: parseInt(variant.stock.toString()),
           })
+        }).then(async (response) => {
+           if (!response.ok) {
+             const errorData = await response.json();
+             throw new Error(errorData.message || `Failed to create variant ${variant.name}`);
+           }
+           return response.json();
         });
-      }));
+      });
+
+      // 5. Execute all requests
+      await Promise.all(variantRequests);
+
       toast.dismiss(loadingToast);
-      toast.success(`Created variants`, { duration: 3000, position: "top-center" });
+      toast.success(`Successfully added ${variants.length} variants!`, { duration: 3000, position: "top-center" });
       setCurrentStep(3);
     } catch (error) {
+      console.error("Variant Error:", error);
       toast.dismiss(loadingToast);
-      toast.error("Error creating variants");
+      toast.error(error instanceof Error ? error.message : "Error creating variants. Please check SKUs.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // ===================== STEP 3: IMAGES LOGIC =====================
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const newImages: ImagePreview[] = [];
@@ -1885,6 +1917,10 @@ export default function ProductsDisplayPage() {
 
   const handleCancelAddProduct = () => {
     if (window.confirm("Cancel addition? Data will be lost.")) handleCompleteAddProduct();
+  };
+
+  const handleBackStep = () => {
+    if (currentStep > 1) setCurrentStep(currentStep - 1);
   };
 
   // ===================== TABLE CONFIGURATION =====================
@@ -2138,34 +2174,122 @@ export default function ProductsDisplayPage() {
                 </div>
               )}
 
-              {/* === STEP 2: VARIANTS === */}
+              {/* === STEP 2: VARIANTS (OPTIMIZED) === */}
               {currentStep === 2 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="flex justify-between items-center bg-blue-50 p-4 rounded-lg border border-blue-100">
-                    <p className="text-sm text-blue-800">Create variants for <strong>{productData.name}</strong> (e.g., Sizes, Colors).</p>
-                    <Button size="sm" onClick={addVariant} variant="outline" className="bg-white border-blue-200 text-blue-700 hover:bg-blue-100 text-xs h-8 shadow-sm"> + Add Variant </Button>
-                  </div>
+                    <div className="flex justify-between items-center bg-blue-50 p-4 rounded-lg border border-blue-100">
+                    <div>
+                        <p className="text-sm font-semibold text-blue-900">Configure Variants</p>
+                        <p className="text-xs text-blue-700">Add variations for <strong>{productData.name}</strong> (e.g., 500g, 1kg).</p>
+                    </div>
+                    <Button 
+                        size="sm" 
+                        onClick={addVariant} 
+                        variant="outline" 
+                        disabled={isSubmitting} 
+                        className="bg-white border-blue-200 text-blue-700 hover:bg-blue-100 text-xs h-9 shadow-sm"
+                    > 
+                        + Add Another Variant 
+                    </Button>
+                    </div>
 
-                  <div className="space-y-3">
+                    <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
                     {variants.map((variant, index) => (
-                      <div key={index} className="p-5 rounded-xl border border-gray-200 bg-white shadow-sm hover:border-gray-300 transition-all relative group">
-                        <div className="absolute top-4 right-4">
-                            {variants.length > 1 && ( <button onClick={() => removeVariant(index)} className="text-gray-300 hover:text-red-500 transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button> )}
+                        <div key={index} className="p-5 rounded-xl border border-gray-200 bg-white shadow-sm hover:border-gray-900 transition-all relative group">
+                        
+                        {/* Header Row: Variant Label + Delete Button */}
+                        <div className="flex justify-between items-center mb-4">
+                            <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded uppercase tracking-wider">
+                            Option #{index + 1}
+                            </span>
+                            {variants.length > 1 && ( 
+                            <button 
+                                onClick={() => removeVariant(index)} 
+                                disabled={isSubmitting}
+                                className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                                title="Remove this variant"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button> 
+                            )}
                         </div>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 block">Variant #{index + 1}</span>
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                          <Input name="name" value={variant.name} onChange={(e) => handleVariantChange(index, e)} placeholder="Name (e.g. XL)" className="h-10 text-sm" />
-                          <Input name="sku" value={variant.sku} onChange={(e) => handleVariantChange(index, e)} placeholder="SKU" className="h-10 text-sm" />
-                          <Input type="number" name="price" value={variant.price} onChange={(e) => handleVariantChange(index, e)} placeholder="Price" className="h-10 text-sm" />
-                          <Input type="number" name="stock" value={variant.stock} onChange={(e) => handleVariantChange(index, e)} placeholder="Stock" className="h-10 text-sm" />
-                          <select name="unit_id" value={variant.unit_id} onChange={(e) => handleVariantChange(index, e)} className="w-full h-10 px-2 bg-white border border-gray-200 rounded-lg text-sm focus:border-gray-900 outline-none">
-                            <option value="">Unit</option>
-                            {units.map((u) => (<option key={u.unit_id} value={u.unit_id}>{u.short}</option>))}
-                          </select>
+
+                        {/* Input Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                            
+                            {/* Name */}
+                            <div className="md:col-span-3">
+                            <Label className="mb-1 text-[10px] uppercase text-gray-400">Variant Name</Label>
+                            <Input 
+                                name="name" 
+                                value={variant.name} 
+                                onChange={(e) => handleVariantChange(index, e)} 
+                                placeholder="e.g. 1kg Packet" 
+                                className="h-10 text-sm"
+                                disabled={isSubmitting}
+                            />
+                            </div>
+
+                            {/* SKU */}
+                            <div className="md:col-span-3">
+                            <Label className="mb-1 text-[10px] uppercase text-gray-400">Unique SKU</Label>
+                            <Input 
+                                name="sku" 
+                                value={variant.sku} 
+                                onChange={(e) => handleVariantChange(index, e)} 
+                                placeholder="SKU-1KG" 
+                                className="h-10 text-sm"
+                                disabled={isSubmitting}
+                            />
+                            </div>
+
+                            {/* Unit */}
+                            <div className="md:col-span-2">
+                            <Label className="mb-1 text-[10px] uppercase text-gray-400">Unit</Label>
+                            <select 
+                                name="unit_id" 
+                                value={variant.unit_id} 
+                                onChange={(e) => handleVariantChange(index, e)} 
+                                className="w-full h-10 px-2 bg-white border border-gray-200 rounded-lg text-sm focus:border-gray-900 outline-none"
+                                disabled={isSubmitting}
+                            >
+                                <option value="">Select</option>
+                                {units.map((u) => (<option key={u.unit_id} value={u.unit_id}>{u.short}</option>))}
+                            </select>
+                            </div>
+
+                            {/* Price */}
+                            <div className="md:col-span-2">
+                            <Label className="mb-1 text-[10px] uppercase text-gray-400">Price</Label>
+                            <Input 
+                                type="number" 
+                                name="price" 
+                                value={variant.price} 
+                                onChange={(e) => handleVariantChange(index, e)} 
+                                placeholder="0.00" 
+                                className="h-10 text-sm"
+                                disabled={isSubmitting}
+                            />
+                            </div>
+
+                            {/* Stock */}
+                            <div className="md:col-span-2">
+                            <Label className="mb-1 text-[10px] uppercase text-gray-400">Stock</Label>
+                            <Input 
+                                type="number" 
+                                name="stock" 
+                                value={variant.stock} 
+                                onChange={(e) => handleVariantChange(index, e)} 
+                                placeholder="0" 
+                                className="h-10 text-sm"
+                                disabled={isSubmitting}
+                            />
+                            </div>
+
                         </div>
-                      </div>
+                        </div>
                     ))}
-                  </div>
+                    </div>
                 </div>
               )}
 
@@ -2225,14 +2349,6 @@ export default function ProductsDisplayPage() {
                 <div>
                   <h3 className="text-2xl font-bold text-gray-900">{viewDetailsModal.name}</h3>
                   <div className="flex items-center gap-2 mt-2">
-                    {/* FIXED: Implementing stricter Badge props from previous solution */}
-                    {/* <Badge 
-                      variant="soft" 
-                      color={viewDetailsModal.inStock === "AVILABLE" ? "success" : "error"} 
-                      className="rounded-md"
-                    >
-                      {viewDetailsModal.inStock === "AVILABLE" ? "In Stock" : "Out of Stock"}
-                    </Badge> */}
                     <span className="text-xs font-mono text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded">{viewDetailsModal.sku}</span>
                   </div>
                 </div>
@@ -2275,9 +2391,4 @@ export default function ProductsDisplayPage() {
       )}
     </div>
   );
-
-  // Helper for back step
-  function handleBackStep() {
-    if (currentStep > 1) setCurrentStep(currentStep - 1);
-  }
 }
